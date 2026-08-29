@@ -1,10 +1,4 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Stdio,
-    sync::atomic::{AtomicU64, Ordering},
-    time::Duration,
-};
+use std::{fs, path::Path, process::Stdio, time::Duration};
 
 use anyhow::{Context, bail};
 use chrono::Utc;
@@ -17,13 +11,23 @@ pub struct Screenshot {
     pub content_type: &'static str,
 }
 
-static NEXT_SCREENSHOT_ID: AtomicU64 = AtomicU64::new(1);
+const MAX_SCREENSHOT_BYTES: u64 = 25 * 1024 * 1024;
 
 pub async fn capture() -> anyhow::Result<Screenshot> {
-    let path = temp_path();
+    let temp_dir = tempfile::Builder::new()
+        .prefix("distributed-watchdog-screenshot-")
+        .tempdir()
+        .context("failed to create private screenshot directory")?;
+    let path = temp_dir.path().join("capture.png");
     let result = capture_to_path(&path).await;
     match result {
         Ok(()) => {
+            let metadata = tokio::fs::metadata(&path)
+                .await
+                .with_context(|| format!("failed to inspect screenshot {}", path.display()))?;
+            if metadata.len() > MAX_SCREENSHOT_BYTES {
+                bail!("screenshot exceeds the 25 MiB limit");
+            }
             let bytes = tokio::fs::read(&path)
                 .await
                 .with_context(|| format!("failed to read screenshot {}", path.display()))?;
@@ -80,6 +84,7 @@ $bottom = ($screens | ForEach-Object {{ $_.Bounds.Bottom }} | Measure-Object -Ma
 $width = [int]($right - $left)
 $height = [int]($bottom - $top)
 if ($width -le 0 -or $height -le 0) {{ throw "invalid screen bounds" }}
+if (([int64]$width * [int64]$height) -gt 100000000) {{ throw "desktop exceeds the 100 megapixel limit" }}
 $bitmap = New-Object System.Drawing.Bitmap $width, $height
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
 try {{
@@ -185,13 +190,4 @@ async fn run_command(command: &mut Command, label: &str) -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-fn temp_path() -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "distributed-watchdog-screenshot-{}-{}-{}.png",
-        std::process::id(),
-        Utc::now().timestamp_millis(),
-        NEXT_SCREENSHOT_ID.fetch_add(1, Ordering::Relaxed)
-    ))
 }

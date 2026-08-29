@@ -36,14 +36,10 @@ pub async fn schedule(config: &UpdateConfig, node_id: &str) -> anyhow::Result<Up
         anyhow!("update launcher could not start")
     })?;
 
-    let stdout = compact_output(&output.stdout);
-    let stderr = compact_output(&output.stderr);
     if !output.status.success() {
         warn!(
             status = ?output.status,
-            stdout = %redact_output(&stdout),
-            stderr = %redact_output(&stderr),
-            "update launcher failed"
+            "update launcher failed; inspect the protected local update log"
         );
         bail!("update launcher failed");
     }
@@ -56,35 +52,4 @@ pub async fn schedule(config: &UpdateConfig, node_id: &str) -> anyhow::Result<Up
         message,
         completed_at: chrono::Utc::now(),
     })
-}
-
-fn compact_output(bytes: &[u8]) -> String {
-    let text = String::from_utf8_lossy(bytes);
-    let trimmed = text.trim();
-    if trimmed.len() <= 500 {
-        return trimmed.to_string();
-    }
-    let mut end = 500;
-    while !trimmed.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}...", &trimmed[..end])
-}
-
-fn redact_output(text: &str) -> String {
-    text.split_whitespace()
-        .map(|part| {
-            if part.contains("://") && part.contains('@') {
-                "<redacted-url>"
-            } else if part.to_ascii_uppercase().contains("TOKEN")
-                || part.to_ascii_uppercase().contains("SECRET")
-                || part.to_ascii_uppercase().contains("PASSWORD")
-            {
-                "<redacted>"
-            } else {
-                part
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::ErrorKind,
     path::PathBuf,
     sync::Arc,
@@ -22,6 +22,7 @@ use crate::{
 };
 
 const USERINFO_RATE_LIMIT: Duration = Duration::from_secs(10);
+const UNAUTHORIZED_RATE_LIMIT: Duration = Duration::from_secs(30);
 const MONITOR_INTERVAL: Duration = Duration::from_secs(1);
 const MONITOR_MAX_DURATION: Duration = Duration::from_secs(10 * 60);
 const BAR_WIDTH: usize = 12;
@@ -83,6 +84,7 @@ struct TelegramRuntime {
     bot_username: Option<String>,
     monitors: Mutex<HashMap<String, MonitorHandle>>,
     userinfo_last_seen: Mutex<HashMap<i64, Instant>>,
+    unauthorized_last_seen: Mutex<HashMap<i64, Instant>>,
     speedtest_running: Mutex<bool>,
     screenshot_running: Mutex<bool>,
     update_running: Mutex<bool>,
@@ -94,6 +96,7 @@ impl TelegramRuntime {
             bot_username,
             monitors: Mutex::new(HashMap::new()),
             userinfo_last_seen: Mutex::new(HashMap::new()),
+            unauthorized_last_seen: Mutex::new(HashMap::new()),
             speedtest_running: Mutex::new(false),
             screenshot_running: Mutex::new(false),
             update_running: Mutex::new(false),
@@ -302,6 +305,16 @@ async fn handle_message(
 
     if !is_authorized(&state, chat_id) {
         warn!(chat_id, "rejected unauthorized Telegram chat");
+        if rate_limit(
+            &runtime.unauthorized_last_seen,
+            chat_id,
+            UNAUTHORIZED_RATE_LIMIT,
+        )
+        .await
+        .is_some()
+        {
+            return;
+        }
         let response = if state.config.telegram_chat_ids().is_empty() {
             "Setup needed\nSend /userinfo here, then set TELEGRAM_CHAT_ID to this chat ID."
         } else {
@@ -864,7 +877,15 @@ async fn start_live_monitor(
     chat_id: i64,
     hosts: &[&str],
 ) -> anyhow::Result<()> {
-    let targets = monitor_targets(&state, hosts);
+    {
+        let mut monitors = runtime.monitors.lock().await;
+        monitors.retain(|_, monitor| !monitor.handle.is_finished());
+        if monitors.values().any(|monitor| monitor.chat_id == chat_id) {
+            bail!("this chat already has a live monitor; stop it before starting another");
+        }
+    }
+
+    let targets = monitor_targets(&state, hosts)?;
     let monitor_id = Uuid::new_v4().to_string();
     let markup = stop_monitor_markup(&monitor_id);
     let sent = client
@@ -950,14 +971,34 @@ async fn live_monitor_loop(
     info!(monitor_id, "live monitor ended");
 }
 
-fn monitor_targets(state: &AppState, hosts: &[&str]) -> Vec<String> {
+fn monitor_targets(state: &AppState, hosts: &[&str]) -> anyhow::Result<Vec<String>> {
     if hosts.is_empty() {
         let mut all = vec![state.config.node.id.clone()];
         all.extend(state.config.peers.iter().map(|peer| peer.id.clone()));
-        all
-    } else {
-        hosts.iter().map(|host| (*host).to_string()).collect()
+        return Ok(all);
     }
+
+    let mut configured = HashMap::new();
+    configured.insert(
+        state.config.node.id.to_ascii_lowercase(),
+        state.config.node.id.clone(),
+    );
+    for peer in &state.config.peers {
+        configured.insert(peer.id.to_ascii_lowercase(), peer.id.clone());
+    }
+
+    let mut seen = HashSet::new();
+    let mut targets = Vec::new();
+    for host in hosts {
+        let key = host.to_ascii_lowercase();
+        let canonical = configured
+            .get(&key)
+            .ok_or_else(|| anyhow::anyhow!("unknown host {host}"))?;
+        if seen.insert(key) {
+            targets.push(canonical.clone());
+        }
+    }
+    Ok(targets)
 }
 
 async fn render_monitor_live(state: &AppState, targets: &[String]) -> String {
@@ -1301,11 +1342,15 @@ async fn rate_limit(
 ) -> Option<u64> {
     let now = Instant::now();
     let mut seen = seen.lock().await;
+    seen.retain(|_, last_seen| now.duration_since(*last_seen) < window.saturating_mul(2));
     if let Some(last_seen) = seen.get(&chat_id) {
         let elapsed = now.duration_since(*last_seen);
         if elapsed < window {
             return Some(window.saturating_sub(elapsed).as_secs());
         }
+    }
+    if seen.len() >= 1024 {
+        seen.clear();
     }
     seen.insert(chat_id, now);
     None
@@ -1578,20 +1623,77 @@ impl TelegramClient {
 }
 
 fn telegram_html(text: &str) -> String {
-    html_escape(&truncate(text.to_string()))
+    telegram_html_with_limit(text, 3900)
 }
 
 fn telegram_caption_html(text: &str) -> String {
-    const MAX_CAPTION: usize = 1024;
-    let truncated = if text.len() <= MAX_CAPTION {
-        text.to_string()
-    } else {
-        format!(
-            "{}...",
-            truncate_at_char_boundary(text, MAX_CAPTION.saturating_sub(3))
-        )
-    };
-    html_escape(&truncated)
+    telegram_html_with_limit(text, 1000)
+}
+
+fn telegram_html_with_limit(text: &str, max_bytes: usize) -> String {
+    let lines: Vec<_> = text.lines().collect();
+    let mut output = String::with_capacity(text.len().min(max_bytes));
+
+    for (index, line) in lines.iter().enumerate() {
+        let formatted = format_telegram_line(&lines, index, line);
+        let separator = usize::from(!output.is_empty());
+        if output.len() + separator + formatted.len() > max_bytes {
+            if output.len() + 4 <= max_bytes {
+                output.push_str("\n...");
+            }
+            break;
+        }
+        if !output.is_empty() {
+            output.push('\n');
+        }
+        output.push_str(&formatted);
+    }
+
+    output
+}
+
+fn format_telegram_line(lines: &[&str], index: usize, line: &str) -> String {
+    if line.is_empty() {
+        return String::new();
+    }
+
+    let escaped = html_escape(line);
+    if index == 0 || line == ".env" || line.ends_with(':') {
+        return format!("<b>{escaped}</b>");
+    }
+    if line.starts_with('/')
+        || line.starts_with("  ")
+        || line.starts_with("- ")
+        || (line.contains('=') && !line.contains(' '))
+    {
+        return format!("<code>{escaped}</code>");
+    }
+    if index > 0
+        && lines[index - 1].is_empty()
+        && lines
+            .get(index + 1)
+            .is_some_and(|next| next.starts_with("  "))
+    {
+        return format!("<b>{escaped}</b>");
+    }
+    if let Some((label, value)) = line.split_once(':')
+        && is_telegram_label(label)
+    {
+        return format!("<b>{}:</b>{}", html_escape(label), html_escape(value));
+    }
+    if line.ends_with("...") || line.starts_with("Check ") {
+        return format!("<i>{escaped}</i>");
+    }
+
+    escaped
+}
+
+fn is_telegram_label(label: &str) -> bool {
+    !label.is_empty()
+        && label.len() <= 32
+        && label
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b' ' | b'_' | b'-'))
 }
 
 fn html_escape(text: &str) -> String {
@@ -1952,6 +2054,26 @@ mod tests {
         ));
         assert!(description.contains("bot<redacted>"));
         assert!(!description.contains("ABC_def"));
+    }
+
+    #[test]
+    fn telegram_html_formats_interface_text_and_escapes_values() {
+        let html = telegram_html(
+            "Monitor\nHost: gpu <0> & main\n\nnode-a\n  CPU  [######------] 50.0%\n/status - cluster overview",
+        );
+
+        assert!(html.contains("<b>Monitor</b>"));
+        assert!(html.contains("<b>Host:</b> gpu &lt;0&gt; &amp; main"));
+        assert!(html.contains("<b>node-a</b>"));
+        assert!(html.contains("<code>  CPU  [######------] 50.0%</code>"));
+        assert!(html.contains("<code>/status - cluster overview</code>"));
+    }
+
+    #[test]
+    fn telegram_html_never_exceeds_telegram_limit() {
+        let html = telegram_html(&format!("Status\n{}", "- row\n".repeat(1000)));
+        assert!(html.len() <= 3900);
+        assert!(html.ends_with("\n..."));
     }
 
     #[test]

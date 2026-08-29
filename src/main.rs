@@ -89,14 +89,6 @@ async fn serve(config: Config) -> anyhow::Result<()> {
     let bind = config.node.bind_addr()?;
     let state = Arc::new(AppState::new(config).context("failed to initialize state")?);
 
-    if let Err(err) = state.refresh_self().await {
-        warn!(?err, "failed to refresh local metrics during startup");
-    }
-    if let Err(err) = state.poll_peers().await {
-        warn!(?err, "failed to poll peers during startup");
-    }
-    state.recompute_leader().await;
-
     let peer_state = Arc::clone(&state);
     tokio::spawn(async move {
         loop {

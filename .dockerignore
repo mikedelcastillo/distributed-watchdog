@@ -1,0 +1,16 @@
+.git
+.github
+.local
+.env
+.env.*
+config.toml
+hosts.local.toml
+*.local.toml
+*.secret.toml
+*.local.plist
+*.private.plist
+.watchdog-state
+target
+*.log
+*.tmp
+*.png
