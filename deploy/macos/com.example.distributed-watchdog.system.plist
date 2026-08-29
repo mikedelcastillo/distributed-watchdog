@@ -12,21 +12,14 @@
     <string>/usr/local/etc/distributed-watchdog/config.toml</string>
     <string>serve</string>
   </array>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>TELEGRAM_TOKEN</key>
-    <string>replace-with-private-token</string>
-    <key>TELEGRAM_CHAT_ID</key>
-    <string>replace-with-private-chat-id</string>
-    <key>CLUSTER_SECRET</key>
-    <string>replace-with-private-secret</string>
-  </dict>
   <key>WorkingDirectory</key>
   <string>/usr/local/etc/distributed-watchdog</string>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>Umask</key>
+  <integer>63</integer>
   <key>StandardOutPath</key>
   <string>/usr/local/var/log/distributed-watchdog.log</string>
   <key>StandardErrorPath</key>

@@ -47,10 +47,10 @@ Use LAN first for lowest latency and Tailscale as fallback when both networks ar
 On Windows, open the watchdog port only to explicit LAN and Tailscale ranges or peer `/32` addresses:
 
 ```powershell
-.\deploy\windows\allow-firewall.ps1 -LanCidr 192.168.1.0/24 -TailscaleCidr 100.64.0.0/10
+.\deploy\windows\allow-firewall.ps1 -LanCidr 192.168.1.0/24 -TailscaleCidr 100.64.0.10/32
 ```
 
-The helper applies only to Private/Domain firewall profiles. Prefer per-peer `/32` addresses when a laptop may move between networks.
+The helper applies only to Private/Domain firewall profiles. Add one rule per Tailscale peer `/32`; do not expose the port to the whole `100.64.0.0/10` range. Prefer per-peer LAN addresses too when practical.
 
 ## Speed Tests
 
@@ -119,11 +119,13 @@ Install private config at:
 /etc/distributed-watchdog/env
 ```
 
-Install and start:
+Install and start the elevated system service:
 
 ```sh
 sudo deploy/linux/install-systemd.sh
 ```
+
+The installer must run as root (normally through `sudo`). It installs a systemd override that runs the watchdog as `root`, so `/off` can work when `node.allow_shutdown = true` in private `config.toml`. The private `config.toml` and `env` files are owned by root and mode `600`.
 
 For a user-local test start without systemd:
 
@@ -151,13 +153,13 @@ Expected files:
 - `config.toml`
 - `.env`
 
-Install startup task from an elevated PowerShell:
+Install the elevated startup task from an Administrator PowerShell:
 
 ```powershell
 .\deploy\windows\install-scheduled-task.ps1
 ```
 
-By default this installs a normal interactive user logon task so `/screenshot` can access the desktop. Use `-RunElevated` only if Windows shutdown support requires it. For a headless node that should run before login, use `-RunAsSystem`; screenshot capture will usually be unavailable in that mode.
+The installer refuses a non-Administrator session. By default it creates an interactive current-user logon task with `RunLevel Highest`, so `/off` can work when `node.allow_shutdown = true` in private `config.toml` while screenshots retain access to that user's desktop. The interactive task stores no password. `-RunElevated` is retained for compatibility because the default is already highest privilege. Use `-RunAsSystem` only for a headless startup task; it also runs at highest privilege without stored credentials, but screenshots are usually unavailable because `SYSTEM` has no interactive desktop.
 
 For a one-shot detached start from the install directory:
 
@@ -167,7 +169,7 @@ For a one-shot detached start from the install directory:
 
 The helper stops an existing `distributed-watchdog` process and starts the local `distributed-watchdog.exe` with `config.toml`.
 
-The scheduled-task installer hardens the install directory so the interactive account gets read/execute access to program files and modify access only to `.watchdog-state` and `logs`.
+The scheduled-task installer restricts the install directory, private `.env`, config, state, and logs to `SYSTEM`, local Administrators, and the current interactive task user. The executable, config, and `.env` inputs must all be inside the install directory.
 
 ## Unraid
 
@@ -194,11 +196,24 @@ state_dir = "/state"
 
 ## macOS
 
-Use the launchd plist in `deploy/macos` after placing the binary and private config under `/usr/local`.
+Build the release binary, then install it at `/usr/local/bin/distributed-watchdog`. Keep the private config and environment file at:
 
-Screenshots require Screen Recording permissions for the running service user.
+```text
+/usr/local/etc/distributed-watchdog/config.toml
+/usr/local/etc/distributed-watchdog/.env
+```
 
-Do not use shell-sourced env files for launchd. Put private values into a local copy such as `com.local.distributed-watchdog.plist` with `EnvironmentVariables`, keep the plist/config root-owned, and use permissions no broader than `640` for secrets and config. Local plist names matching `*.local.plist` and `*.private.plist` are ignored by git.
+Install the elevated system `LaunchDaemon` from an administrator account:
+
+```sh
+sudo sh deploy/macos/install-launchd.sh
+```
+
+The installer explicitly requires root, installs `/Library/LaunchDaemons/com.example.distributed-watchdog.plist`, and runs the watchdog as `root` so `/off` can work when `node.allow_shutdown = true` in private `config.toml`. It keeps `config.toml` and `.env` root-owned at mode `600`; `.env` remains the private source of `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, and `CLUSTER_SECRET`. The tracked plist has no credentials.
+
+This system daemon has no interactive desktop, so screenshots are normally unavailable. Screen Recording permissions are relevant only to a separate user-session deployment.
+
+The daemon uses the application's existing `.env` loading from its root-owned working directory; do not add credentials to the tracked plist. Local plist names matching `*.local.plist` and `*.private.plist` remain ignored by git for any separate user-session deployments.
 
 ## Screenshots
 
