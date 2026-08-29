@@ -110,6 +110,10 @@ foreach ($WritableDir in @(
   (Join-Path $InstallDir "logs")
 )) {
   New-Item -ItemType Directory -Force -Path $WritableDir | Out-Null
+  & icacls $WritableDir /reset /T /C | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "failed to reset inherited ACLs on $WritableDir"
+  }
   & icacls $WritableDir `
     /inheritance:r `
     /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*$($userSid.Value):(OI)(CI)M" `
