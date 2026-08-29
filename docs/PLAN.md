@@ -32,10 +32,10 @@ SSH should be optional, not required for normal operation. It is useful for boot
 The cluster should use a lease-based election rather than a permanent master.
 
 - Each node has a stable `node_id`, priority, and shared cluster secret.
-- Nodes exchange heartbeat records with monotonic timestamps and term numbers.
-- A leader owns a short lease, renewed by heartbeat.
+- Nodes exchange heartbeat records with start time, health, and metrics.
+- A leader is considered valid while it is seen inside the configured lease window.
 - If the leader lease expires, eligible online nodes elect a replacement.
-- Tie-breaking is deterministic: highest priority, then lowest stable node ID.
+- Election is deterministic: highest priority wins, then oldest live eligible start time breaks ties, then lowest stable node ID.
 - Only the active leader processes Telegram updates.
 - Non-leaders still expose local health and metrics APIs.
 
@@ -45,9 +45,10 @@ This is intentionally simple because the home network is small. If the cluster g
 
 Initial transport:
 
-- HTTP on the trusted LAN or Tailscale interface.
-- Shared bearer token or HMAC-signed requests.
-- Optional TLS/mTLS later.
+- HTTP on the trusted LAN or Tailscale interface, enabled explicitly in private config.
+- Each peer can define both `lan_url` and `tailscale_url`; the agent tries all configured URLs.
+- Shared bearer token for read/control endpoints and HMAC-signed update requests.
+- HTTPS or mTLS should replace plaintext HTTP for any untrusted route.
 
 Why not SSH as the core transport:
 
@@ -72,12 +73,15 @@ Commands:
 - `/leader`
 - `/on <host>`
 - `/off <host>`
-- `/monitor <hosts...>`
-- `/silence [duration]`
-- `/resume`
+- `/monitor <hosts...>` with one-second in-place updates, text bars, an inline Stop button, and a 10-minute cap.
+- `/speedtest <host>` to test internet download throughput from one node.
+- `/speedtest <source> <target>` to test node-to-node throughput; the source downloads from the target.
+- `/screenshot <host>` for allowlisted interactive nodes.
+- `/update [all|host ...]` for opt-in pull/build/install/restart on configured nodes, using signed short-lived operation requests and per-node update locks.
+- `/userinfo`
 - `/help`
 
-Command authorization should require configured Telegram user or chat IDs.
+Command authorization requires configured Telegram chat IDs. Sensitive commands require a private chat by default; group control is an explicit opt-in.
 
 ## Metrics
 
@@ -90,6 +94,12 @@ Common metrics:
 - Disk usage.
 - Network throughput.
 - GPU usage, memory, and temperature when available.
+
+Network speed tests:
+
+- Internet tests download a bounded byte count from configured external test URLs.
+- Peer tests use the authenticated watchdog HTTP API, not SSH, and transfer bounded byte streams between two configured nodes.
+- LAN URLs are tried before Tailscale URLs so degraded local link speed is visible when the LAN route is healthy.
 
 Linux collectors:
 
@@ -143,10 +153,14 @@ Config should include:
 
 - Node identity.
 - Peer list.
-- Telegram bot token and authorized chat IDs.
+- LAN and Tailscale URLs for each peer.
+- Telegram bot token and authorized chat ID from `TELEGRAM_TOKEN` and `TELEGRAM_CHAT_ID`.
 - Cluster authentication secret.
+- Local state directory for Telegram update offsets and other small runtime files.
 - Host MAC addresses and Wake-on-LAN settings.
 - Per-host feature flags for shutdown, metrics, SSH fallback, and Docker behavior.
+- Optional fixed local updater command for nodes that allow `/update`.
+- Default localhost bind with explicit private-config exposure for LAN or Tailscale addresses.
 
 ## Repository Layout
 
@@ -180,17 +194,13 @@ distributed-watchdog/
 5. Add Telegram command handling and alert formatting.
 6. Add Wake-on-LAN.
 7. Add safe shutdown handlers with per-host allowlists.
-8. Add packaging for systemd, Windows service, and Docker.
-9. Test first on fully available Linux machines, then expand to Windows endpoints.
-10. Add Unraid Docker docs and macOS launchd support.
+8. Add `/screenshot` and `/speedtest`.
+9. Add packaging for systemd, Windows scheduled task, Docker, and macOS launchd.
+10. Test first on fully available Linux machines, then expand to Windows endpoints.
+11. Add Unraid Docker docs and macOS launchd support.
 
-## Local Discovery Notes
+## Rollout Notes
 
-Initial discovery showed a mixed fleet:
+Keep private fleet inventory, addresses, MAC addresses, and tokens out of this public repo. Put those details only in ignored per-node config files.
 
-- Linux machines running Ubuntu 24.04 with NVIDIA GPUs and Docker available.
-- Windows machines reachable over SSH with Tailscale present on at least some hosts.
-- One Windows host had SSH reachable but local host-key verification needs manual cleanup before SSH automation.
-- Future nodes include Unraid through Docker and a macOS laptop.
-
-Private addresses, MAC addresses, and tokens are intentionally omitted from this public repo.
+Future node types should be added through the same per-node config model. Docker/Unraid and macOS support should stay opt-in until the host permissions, screenshots, sensors, and shutdown behavior are tested on those platforms.

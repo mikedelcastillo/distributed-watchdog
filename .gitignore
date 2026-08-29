@@ -5,11 +5,26 @@ node_modules/
 .env
 .env.*
 !.env.example
+/env
+deploy/**/env
+secrets.*
+*.secret.toml
+*.local.plist
+*.private.plist
+deploy/macos/*.plist.local
 
 config.toml
 hosts.local.toml
 *.local.toml
 *.local.md
+.local/
+.watchdog-state/
 
 *.log
 *.tmp
+*.png
+
+
+# Added by cargo
+
+/target

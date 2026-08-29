@@ -2,39 +2,59 @@
 
 [cluster]
 name = "home"
-shared_secret_env = "DISTRIBUTED_WATCHDOG_CLUSTER_SECRET"
+state_dir = ".watchdog-state"
+shared_secret_env = "CLUSTER_SECRET"
+# Set true only in private configs when the watchdog API is restricted to trusted
+# LAN/Tailscale peers by host firewall rules. Prefer HTTPS/mTLS for untrusted links.
+allow_plaintext_peer_urls = false
 heartbeat_interval_seconds = 10
 leader_lease_seconds = 30
+request_timeout_millis = 15000
 
 [node]
 id = "example-node"
 display_name = "Example Node"
 priority = 100
-bind = "0.0.0.0:7373"
-public_url = "http://example-node.local:7373"
+# Bind localhost by default. Use a private config value such as "192.168.1.10:7373"
+# or "100.64.0.10:7373" only after firewalling the port to trusted peers.
+bind = "127.0.0.1:7373"
+public_url = "http://127.0.0.1:7373"
 eligible_leader = true
+allow_shutdown = false
+allow_screenshot = false
 
 [telegram]
-bot_token_env = "DISTRIBUTED_WATCHDOG_TELEGRAM_TOKEN"
+bot_token_env = "TELEGRAM_TOKEN"
+chat_id_env = "TELEGRAM_CHAT_ID"
 authorized_chat_ids = []
+authorized_user_ids = []
 polling_timeout_seconds = 30
+allow_group_control = false
 
 [[peers]]
 id = "example-linux"
 display_name = "Example Linux"
-url = "http://example-linux.local:7373"
+priority = 100
+lan_url = "http://127.0.0.1:7374"
+# Private configs can also set:
+# tailscale_url = "http://100.64.0.10:7373"
 wol_mac = "00:00:00:00:00:00"
-wol_broadcast = "192.168.1.255:9"
+wol_broadcast = "255.255.255.255:9"
 allow_shutdown = false
+allow_screenshot = false
 ssh_fallback = false
 
 [[peers]]
 id = "example-windows"
 display_name = "Example Windows"
-url = "http://example-windows.local:7373"
+priority = 90
+lan_url = "http://127.0.0.1:7375"
+# Private configs can also set:
+# tailscale_url = "http://100.64.0.11:7373"
 wol_mac = "00:00:00:00:00:00"
-wol_broadcast = "192.168.1.255:9"
+wol_broadcast = "255.255.255.255:9"
 allow_shutdown = false
+allow_screenshot = false
 ssh_fallback = false
 
 [alerts]
@@ -42,3 +62,16 @@ offline_after_missed_heartbeats = 3
 cpu_temp_celsius = 85
 gpu_temp_celsius = 85
 disk_free_percent = 10
+
+[speedtest]
+internet_bytes = 25000000
+peer_bytes = 64000000
+max_bytes = 256000000
+timeout_seconds = 30
+rpc_timeout_seconds = 45
+internet_download_urls = ["https://speed.cloudflare.com/__down?bytes={bytes}"]
+
+[update]
+enabled = false
+command = []
+timeout_seconds = 30
