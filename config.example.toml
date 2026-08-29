@@ -1,0 +1,44 @@
+# Example only. Keep real tokens, chat IDs, MAC addresses, and host URLs out of git.
+
+[cluster]
+name = "home"
+shared_secret_env = "DISTRIBUTED_WATCHDOG_CLUSTER_SECRET"
+heartbeat_interval_seconds = 10
+leader_lease_seconds = 30
+
+[node]
+id = "example-node"
+display_name = "Example Node"
+priority = 100
+bind = "0.0.0.0:7373"
+public_url = "http://example-node.local:7373"
+eligible_leader = true
+
+[telegram]
+bot_token_env = "DISTRIBUTED_WATCHDOG_TELEGRAM_TOKEN"
+authorized_chat_ids = []
+polling_timeout_seconds = 30
+
+[[peers]]
+id = "example-linux"
+display_name = "Example Linux"
+url = "http://example-linux.local:7373"
+wol_mac = "00:00:00:00:00:00"
+wol_broadcast = "192.168.1.255:9"
+allow_shutdown = false
+ssh_fallback = false
+
+[[peers]]
+id = "example-windows"
+display_name = "Example Windows"
+url = "http://example-windows.local:7373"
+wol_mac = "00:00:00:00:00:00"
+wol_broadcast = "192.168.1.255:9"
+allow_shutdown = false
+ssh_fallback = false
+
+[alerts]
+offline_after_missed_heartbeats = 3
+cpu_temp_celsius = 85
+gpu_temp_celsius = 85
+disk_free_percent = 10

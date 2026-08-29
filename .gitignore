@@ -1,0 +1,15 @@
+# Build outputs
+target/
+node_modules/
+
+.env
+.env.*
+!.env.example
+
+config.toml
+hosts.local.toml
+*.local.toml
+*.local.md
+
+*.log
+*.tmp
