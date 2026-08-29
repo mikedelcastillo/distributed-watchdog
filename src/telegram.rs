@@ -141,13 +141,6 @@ pub async fn run(state: Arc<AppState>) -> anyhow::Result<()> {
             continue;
         }
 
-        if offset.is_none() {
-            offset = initialize_update_offset(&client, &state).await?;
-            if !state.is_leader().await {
-                continue;
-            }
-        }
-
         match client
             .get_updates(offset, state.config.telegram.polling_timeout_seconds)
             .await
@@ -159,21 +152,6 @@ pub async fn run(state: Arc<AppState>) -> anyhow::Result<()> {
                     }
 
                     let next_offset = update.update_id + 1;
-                    if let Err(err) = client.commit_update(next_offset).await {
-                        warn!(
-                            update_id = update.update_id,
-                            error = %err,
-                            "failed to commit Telegram update before handling"
-                        );
-                        continue;
-                    }
-                    store_update_offset(&state, next_offset).await?;
-                    offset = Some(next_offset);
-
-                    if !state.is_leader().await {
-                        continue;
-                    }
-
                     if let Some(message) = update.message {
                         handle_message(&client, Arc::clone(&runtime), Arc::clone(&state), message)
                             .await;
@@ -187,6 +165,17 @@ pub async fn run(state: Arc<AppState>) -> anyhow::Result<()> {
                         )
                         .await;
                     }
+
+                    if let Err(err) = client.commit_update(next_offset).await {
+                        warn!(
+                            update_id = update.update_id,
+                            error = %err,
+                            "failed to commit handled Telegram update"
+                        );
+                        continue;
+                    }
+                    store_update_offset(&state, next_offset).await?;
+                    offset = Some(next_offset);
                 }
             }
             Err(err) => {
@@ -237,19 +226,6 @@ async fn alert_loop(client: TelegramClient, state: Arc<AppState>) {
             state.requeue_alerts(retry).await;
         }
     }
-}
-
-async fn initialize_update_offset(
-    client: &TelegramClient,
-    state: &Arc<AppState>,
-) -> anyhow::Result<Option<i64>> {
-    let updates = client.get_updates(None, 0).await?;
-    let Some(next_offset) = updates.iter().map(|update| update.update_id + 1).max() else {
-        return Ok(None);
-    };
-    client.commit_update(next_offset).await?;
-    store_update_offset(state, next_offset).await?;
-    Ok(Some(next_offset))
 }
 
 async fn load_update_offset(state: &Arc<AppState>) -> anyhow::Result<Option<i64>> {
@@ -361,6 +337,8 @@ async fn handle_message(
         }
         return;
     }
+
+    info!(chat_id, command, "handling Telegram command");
 
     if command == "/monitor" {
         let parts: Vec<_> = text.split_whitespace().collect();

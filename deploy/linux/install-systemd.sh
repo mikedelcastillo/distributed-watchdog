@@ -24,8 +24,12 @@ chmod 750 "$install_dir"
 if [ ! -f "$install_dir/env" ]; then
   install -m 600 -o root -g root /dev/null "$install_dir/env"
 else
-  chown root:root "$install_dir/env"
-  chmod 600 "$install_dir/env"
+  normalized_env="$(mktemp)"
+  trap 'rm -f "$normalized_env"' EXIT HUP INT TERM
+  LC_ALL=C sed '1s/^\xEF\xBB\xBF//' "$install_dir/env" | tr -d '\r' >"$normalized_env"
+  install -m 600 -o root -g root "$normalized_env" "$install_dir/env"
+  rm -f "$normalized_env"
+  trap - EXIT HUP INT TERM
 fi
 
 if [ ! -f "$install_dir/config.toml" ]; then
