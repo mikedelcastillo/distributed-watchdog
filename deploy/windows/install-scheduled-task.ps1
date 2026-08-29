@@ -163,6 +163,11 @@ Register-ScheduledTask `
   -Settings $settings `
   -Force | Out-Null
 
+& icacls $InstallDir /setowner "*S-1-5-32-544" /T /C | Out-Null
+if ($LASTEXITCODE -ne 0) {
+  throw "failed to assign protected install ownership"
+}
+
 Write-Host "Installed scheduled task $TaskName"
 Write-Host "Config: $ConfigPath"
 Write-Host "Env: $EnvPath"
