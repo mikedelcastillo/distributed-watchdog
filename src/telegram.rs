@@ -27,6 +27,7 @@ const MONITOR_MAX_DURATION: Duration = Duration::from_secs(10 * 60);
 const BAR_WIDTH: usize = 12;
 const DEFAULT_SHUTDOWN_DELAY_SECONDS: u64 = 0;
 const TELEGRAM_OFFSET_FILE: &str = "telegram-offset";
+const TELEGRAM_PARSE_MODE: &str = "HTML";
 
 const TELEGRAM_BOT_COMMANDS: &[BotCommand] = &[
     BotCommand {
@@ -1574,6 +1575,37 @@ impl TelegramClient {
             .join(method)
             .with_context(|| format!("invalid Telegram method {method}"))
     }
+}
+
+fn telegram_html(text: &str) -> String {
+    html_escape(&truncate(text.to_string()))
+}
+
+fn telegram_caption_html(text: &str) -> String {
+    const MAX_CAPTION: usize = 1024;
+    let truncated = if text.len() <= MAX_CAPTION {
+        text.to_string()
+    } else {
+        format!(
+            "{}...",
+            truncate_at_char_boundary(text, MAX_CAPTION.saturating_sub(3))
+        )
+    };
+    html_escape(&truncated)
+}
+
+fn html_escape(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
 }
 
 async fn telegram_response<T: DeserializeOwned>(
