@@ -91,7 +91,12 @@ if ($LASTEXITCODE -ne 0) {
 
 # Some existing files may have inheritance disabled already, so grant their
 # effective permissions directly instead of relying only on directory ACEs.
-foreach ($ProtectedFile in @($ExePath, $ConfigPath, $EnvPath)) {
+$ProtectedFiles = @($ExePath, $ConfigPath, $EnvPath)
+$ProtectedFiles += @(
+  Get-ChildItem -LiteralPath $InstallDir -Filter "*.ps1" -File -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty FullName
+)
+foreach ($ProtectedFile in @($ProtectedFiles | Select-Object -Unique)) {
   & icacls $ProtectedFile `
     /inheritance:r `
     /grant:r "*S-1-5-18:F" "*S-1-5-32-544:F" "*$($userSid.Value):RX" | Out-Null
@@ -114,9 +119,12 @@ foreach ($WritableDir in @(
   }
 }
 
+$launchCommand = "& '" + $ExePath.Replace("'", "''") + "' --config '" + $ConfigPath.Replace("'", "''") + "' serve"
+$encodedLaunchCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($launchCommand))
+$powerShellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
 $action = New-ScheduledTaskAction `
-  -Execute $ExePath `
-  -Argument "--config `"$ConfigPath`" serve" `
+  -Execute $powerShellPath `
+  -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand $encodedLaunchCommand" `
   -WorkingDirectory $InstallDir
 
 if ($RunAsSystem) {

@@ -6,6 +6,9 @@ binary_path="${BINARY_PATH:-/usr/local/bin/distributed-watchdog}"
 service_path="${SERVICE_PATH:-/etc/systemd/system/distributed-watchdog.service}"
 override_dir="${OVERRIDE_DIR:-/etc/systemd/system/distributed-watchdog.service.d}"
 override_path="$override_dir/elevated.conf"
+updater_dir="${UPDATER_DIR:-/usr/local/lib/distributed-watchdog}"
+updater_path="${UPDATER_PATH:-$updater_dir/update-agent.sh}"
+state_dir="${STATE_DIR:-/var/lib/distributed-watchdog}"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "this installer must be run as root (for example: sudo $0)" >&2
@@ -44,14 +47,23 @@ if [ ! -x "$binary_path" ]; then
   exit 1
 fi
 
+mkdir -p "$updater_dir"
+install -m 755 -o root -g root "$(dirname "$0")/update-agent.sh" "$updater_path"
+
 install -m 644 "$(dirname "$0")/../systemd/distributed-watchdog.service" "$service_path"
 mkdir -p "$override_dir"
-cat >"$override_path" <<'EOF'
+cat >"$override_path" <<EOF
 [Service]
 # Run as root so the watchdog can perform explicitly enabled power operations.
 User=root
 Group=root
 NoNewPrivileges=false
+Environment=INSTALL_DIR=$state_dir
+Environment=SOURCE_DIR=$state_dir/source
+Environment=BINARY_PATH=$binary_path
+Environment=UPDATE_LOG_PATH=$state_dir/update.log
+Environment=SERVICE_NAME=distributed-watchdog.service
+ReadWritePaths=$binary_path $state_dir
 EOF
 chmod 644 "$override_path"
 systemctl daemon-reload
