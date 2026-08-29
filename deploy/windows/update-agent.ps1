@@ -52,8 +52,7 @@ function Try-AcquireUpdateLock {
       if ($null -ne $existing) {
         return $false
       }
-    }
-    if ($lockAge -lt $StaleLockSeconds) {
+    } elseif ($lockAge -lt $StaleLockSeconds) {
       return $false
     }
     Remove-Item -LiteralPath $LockPath -Force
