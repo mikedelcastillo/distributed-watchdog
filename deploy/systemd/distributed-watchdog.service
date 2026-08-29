@@ -1,0 +1,23 @@
+[Unit]
+Description=Distributed Watchdog
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=distributed-watchdog
+Group=distributed-watchdog
+EnvironmentFile=/etc/distributed-watchdog/env
+WorkingDirectory=/var/lib/distributed-watchdog
+ExecStart=/usr/local/bin/distributed-watchdog --config /etc/distributed-watchdog/config.toml serve
+Restart=always
+RestartSec=5
+StateDirectory=distributed-watchdog
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

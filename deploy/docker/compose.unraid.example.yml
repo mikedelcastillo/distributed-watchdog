@@ -1,0 +1,21 @@
+services:
+  distributed-watchdog:
+    build: ../..
+    container_name: distributed-watchdog
+    restart: unless-stopped
+    # Host networking is for Wake-on-LAN and peer reachability. Keep node.bind
+    # and host firewall rules limited to trusted LAN/Tailscale peers.
+    network_mode: host
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    env_file:
+      - /mnt/user/appdata/distributed-watchdog/.env
+    volumes:
+      - /mnt/user/appdata/distributed-watchdog/config:/config:ro
+      - /mnt/user/appdata/distributed-watchdog/state:/state
+    command: ["--config", "/config/config.toml", "serve"]
